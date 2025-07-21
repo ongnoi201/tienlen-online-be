@@ -11,7 +11,7 @@ const cors = require('cors');
 app.use(express.json());
 
 const corsOptions = {
-  origin: 'http://localhost:3000', // Chỉ cho phép từ React app đang chạy ở đây
+  origin: 'https://tienlen-online.vercel.app', // Chỉ cho phép từ React app đang chạy ở đây
   methods: ['GET', 'POST', 'PUT', 'DELETE'],        // Giới hạn phương thức
   credentials: true                // Cho phép cookie, token nếu cần
 };
