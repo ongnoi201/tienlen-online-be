@@ -26,7 +26,6 @@ exports.login = async (req, res) => {
         const match = await bcrypt.compare(password, user.password);
         if (!match) return res.json({ status: 400, message: 'Sai tài khoản hoặc mật khẩu' });
 
-        // Tạo token JWT
         const token = jwt.sign(
             { id: user._id, username: user.username },
             'tienlen_secret',
@@ -51,7 +50,7 @@ exports.getUser = async (req, res) => {
     try {
         const { id } = req.params;
         const user = await User.findById(id);
-        if (!user) return res.status(404).json({ message: 'Không tìm thấy user' });
+        if (!user) return res.json({ status:400, message: 'Không tìm thấy user' });
         res.json(user);
     } catch (err) {
         res.json({ status: 500, message: 'Lỗi server', error: err.message });

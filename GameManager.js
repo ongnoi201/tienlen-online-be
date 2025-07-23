@@ -9,13 +9,11 @@ class GameManager {
         this.players = {};
     }
 
-    handleConnection(socket) {
-        // Lấy userId từ auth (nếu có)
-        const userId = socket.handshake.auth?.userId;
+    handleConnection(socket, authData) {
+        const userId = authData?.userId;
         const playerId = userId || socket.id;
         let player = null;
 
-        // === Get available rooms ===
         socket.on('get_rooms', async () => {
             const roomsList = await Promise.all(
                 Object.values(this.rooms).map(async room => ({
@@ -28,7 +26,6 @@ class GameManager {
             socket.emit('rooms_list', roomsList);
         });
 
-        // === Create a new room ===
         socket.on('create_room', async ({ name }) => {
             player = new Player(playerId, socket, name);
             this.players[playerId] = player;
@@ -46,7 +43,6 @@ class GameManager {
             await this.updateRoomsList();
         });
 
-        // === Join an existing room ===
         socket.on('join_room', async ({ roomId, name }) => {
             const room = this.rooms[roomId];
             if (!room) {
@@ -59,7 +55,15 @@ class GameManager {
 
             room.addPlayer(player);
 
-            // Notify all in room
+            //thêm đoạn này
+            room.players.forEach(p => {
+                if (p.id !== playerId) {
+                    p.send('new_peer', { peerId: playerId });
+                    player.send('new_peer', { peerId: p.id });
+                }
+            });
+            // kết thúc đoạn thêm
+
             await this.broadcastToRoom(room, 'joined_room', {
                 roomId,
                 players: await room.getPublicPlayers()
@@ -72,37 +76,38 @@ class GameManager {
             }
         });
 
-        // === Player ready ===
+        //Thêm đoạn này
+        socket.on('signal', ({ targetId, data }) => {
+            const targetPlayer = this.players[targetId];
+            if (targetPlayer) {
+                targetPlayer.send('signal', {
+                    sourceId: playerId,
+                    data
+                });
+            }
+        });
+        //Kết thúc đoạn thêm
+
         socket.on('ready', async () => {
             if (!player?.roomId) return;
-
             const room = this.rooms[player.roomId];
             if (!room) return;
-
             room.setReady(playerId);
-
-            // Gửi riêng sự kiện ready cho tất cả
             await this.broadcastToRoom(room, 'player_ready', { playerId });
-
-            // Gửi lại danh sách người chơi cập nhật trạng thái
             await this.broadcastToRoom(room, 'joined_room', {
                 roomId: room.id,
                 players: await room.getPublicPlayers()
             });
-
             if (room.allReady()) {
                 await room.startGame();
             }
-
             await this.updateRoomsList();
         });
 
-        // === Player leaves room ===
         socket.on('leave_room', async () => {
             await this.removePlayerFromRoom(playerId);
         });
 
-        // === Play card ===
         socket.on('play_card', async ({ cards }) => {
             const room = this.rooms[player?.roomId];
             if (room) {
@@ -110,7 +115,6 @@ class GameManager {
             }
         });
 
-        // === Pass turn ===
         socket.on('pass_turn', async () => {
             const room = this.rooms[player?.roomId];
             if (room) {
@@ -118,11 +122,9 @@ class GameManager {
             }
         });
 
-        // === Disconnect ===
         socket.on('disconnect', async () => {
             await this.removePlayerFromRoom(playerId);
             delete this.players[playerId];
-            console.log(`Player ${playerId} disconnected`);
         });
     }
 
@@ -130,33 +132,28 @@ class GameManager {
         const player = this.players[playerId];
         const roomId = player?.roomId;
         if (!roomId) return;
-
         const room = this.rooms[roomId];
         if (!room) return;
 
         room.removePlayer(playerId);
         player.roomId = null;
-
-        // Gửi thông báo rời phòng cho chính player
         player.send('left_room', { roomId, playerId });
-
-        // Gửi cho các người còn lại
-        await this.broadcastToRoom(room, 'left_room', { roomId, playerId });
 
         if (room.players.length === 0) {
             delete this.rooms[roomId];
+            this.io.emit('room_deleted', { roomId });
         } else {
             await this.broadcastToRoom(room, 'joined_room', {
                 roomId: room.id,
                 players: await room.getPublicPlayers()
             });
-        }
 
+            await this.broadcastToRoom(room, 'left_room', { roomId, playerId });
+        }
         await this.updateRoomsList();
     }
 
     async broadcastToRoom(room, event, data) {
-        // Đảm bảo nếu data có players là Promise thì resolve
         if (data && data.players && typeof data.players.then === 'function') {
             data.players = await data.players;
         }

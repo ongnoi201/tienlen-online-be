@@ -1,6 +1,6 @@
 const GameEngine = require('./GameEngine');
 const { createDeck, shuffle, deal, sortHand } = require('./utils');
-const User = require('./models/User'); // Thêm dòng này để update điểm
+const User = require('./models/User');
 
 class Room {
     constructor(id) {
@@ -12,7 +12,7 @@ class Room {
         this.started = false;
         this.passedPlayers = new Set();
         this.lastWinnerId = null;
-        this._lastGameWinnerId = null; // Thêm biến này để lưu người thắng ván trước
+        this._lastGameWinnerId = null;
     }
 
     addPlayer(player) {
@@ -28,10 +28,9 @@ class Room {
     }
 
     async getPublicPlayers() {
-        // Lấy điểm và image từ database cho từng player
         const playerInfos = await Promise.all(this.players.map(async p => {
             let score = 0;
-            let image = undefined;
+            let image = '';
             try {
                 const user = await User.findOne({ $or: [{ _id: p.id }, { idPlayer: p.id }] });
                 if (user) {
@@ -70,7 +69,7 @@ class Room {
         this.started = true;
         this.lastPlay = null;
         this.passedPlayers.clear();
-        this.lastWinnerId = null; // <-- Reset lại mỗi khi bắt đầu ván mới
+        this.lastWinnerId = null;
 
         const deck = shuffle(createDeck());
         const hands = deal(deck, this.players.length);
@@ -80,14 +79,11 @@ class Room {
             player.finished = false;
         });
 
-        // Chọn người đi đầu
         let firstIdx = 0;
-        // Nếu có lastWinnerId (tức là không phải ván đầu), người thắng ván trước đi trước
         if (this._lastGameWinnerId) {
             const found = this.players.findIndex(p => p.id === this._lastGameWinnerId);
             if (found !== -1) firstIdx = found;
             else {
-                // Nếu người thắng ván trước không còn trong phòng, fallback về 3 bích
                 for (let i = 0; i < this.players.length; i++) {
                     if (this.players[i].hand.some(c => c.value === 3 && c.suit === '♠')) {
                         firstIdx = i;
@@ -96,7 +92,6 @@ class Room {
                 }
             }
         } else {
-            // Ván đầu tiên: ai có 3 bích đi trước
             for (let i = 0; i < this.players.length; i++) {
                 if (this.players[i].hand.some(c => c.value === 3 && c.suit === '♠')) {
                     firstIdx = i;
@@ -106,7 +101,6 @@ class Room {
         }
         this.currentTurn = firstIdx;
 
-        // Lấy điểm mới nhất cho từng player
         const publicPlayers = await this.getPublicPlayers();
 
         this.players.forEach(player => {
@@ -138,7 +132,6 @@ class Room {
             c => !cards.some(card => card.value === c.value && card.suit === c.suit)
         );
 
-        // Lưu lại lượt trước để tính điểm chặt
         const prevLastPlay = this.lastPlay;
         const prevLastPlayPlayerId = this.lastPlayPlayerId;
 
@@ -147,13 +140,11 @@ class Room {
 
         this.broadcast('play_card', { playerId, cards });
 
-        // Lấy điểm mới nhất cho từng player sau khi đánh bài
         const publicPlayers = await this.getPublicPlayers();
         this.broadcast('update_players', {
             players: publicPlayers
         });
 
-        // Xử lý điểm khi chặt
         if (prevLastPlay && prevLastPlayPlayerId && this.engine.isStronger(cards, prevLastPlay)) {
             const comboType = this.engine.getComboType(cards);
             const lastType = this.engine.getComboType(prevLastPlay);
@@ -203,7 +194,6 @@ class Room {
             player.finished = true;
             this.broadcast('player_finished', { playerId });
 
-            // Lưu lại người thắng đầu tiên cho ván sau
             if (!this.lastWinnerId) {
                 this.lastWinnerId = playerId;
             }
@@ -220,14 +210,13 @@ class Room {
             // Gửi thứ tự xếp hạng cho client
             this.broadcast('game_over', { 
                 loserId: remaining[0].id,
-                ranking // <-- gửi thêm mảng thứ hạng
+                ranking
             });
 
             // Gán người thắng ván này cho ván sau
             if (this.lastWinnerId) {
                 this._lastGameWinnerId = this.lastWinnerId;
             } else {
-                // fallback: tìm người hết bài đầu tiên
                 const winner = this.players.find(p => p.finished && p.hand.length === 0);
                 if (winner) this._lastGameWinnerId = winner.id;
             }
@@ -241,19 +230,14 @@ class Room {
     }
 
     async calcRankingScore() {
-        // Xác định thứ hạng
-        // Người thắng đầu tiên phải đứng đầu danh sách
         let finishedOrder = [];
-        // Tìm người thắng đầu tiên của ván hiện tại
         const winner = this.players.find(p => p.finished && p.hand.length === 0);
         if (winner) {
             finishedOrder.push(winner.id);
         }
-        // Thêm các player.finished khác (trừ winner)
         this.players.forEach(p => {
             if (p.finished && (!winner || p.id !== winner.id)) finishedOrder.push(p.id);
         });
-        // Thêm các chưa finished (nếu có)
         const unfinished = this.players.filter(p => !p.finished).map(p => p.id);
         const ranking = [...finishedOrder, ...unfinished];
         const n = this.players.length;
@@ -267,25 +251,23 @@ class Room {
                 score = i === 0 ? 10 : (i === 1 ? 5 : 0);
             }
             await this.addScore(ranking[i], score);
-            // Gửi điểm mới nhất về client
             const player = this.players.find(p => p.id === ranking[i]);
             if (player) {
                 const newScore = await this.getUserScore(player.id);
                 player.send('score_update', { scoreDelta: score, score: newScore });
             }
         }
-        return ranking; // <-- trả về thứ tự xếp hạng
+        return ranking;
     }
 
     async addScore(playerId, delta) {
-        // Cập nhật điểm vào database
         try {
             await User.findOneAndUpdate(
                 { $or: [{ _id: playerId }, { idPlayer: playerId }] },
                 { $inc: { score: delta } }
             );
         } catch (e) {
-            // Có thể log lỗi nếu cần
+            console.error('Error updating score:', e);
         }
     }
 
@@ -308,12 +290,9 @@ class Room {
         );
 
         if (activePlayers.length === 1) {
-            // Reset vòng
             this.lastPlay = null;
             this.lastPlayPlayerId = null;
             this.passedPlayers.clear();
-
-            // Cập nhật currentTurn cho người còn lại (ngược chiều)
             this.currentTurn = this.players.findIndex(p => p.id === activePlayers[0].id);
 
             this.broadcast('new_round', {
@@ -332,7 +311,6 @@ class Room {
         let next = this.currentTurn;
 
         for (let i = 0; i < total; i++) {
-            // Giảm chỉ số để đi ngược chiều kim đồng hồ
             next = (next - 1 + total) % total;
             const p = this.players[next];
             if (!this.passedPlayers.has(p.id) && !p.finished) {
@@ -347,18 +325,15 @@ class Room {
         this.lastPlay = null;
         this.lastPlayPlayerId = null;
         this.passedPlayers.clear();
-        // Reset trạng thái ready, finished, hand cho từng player
         this.players.forEach(p => {
             p.isReady = false;
             p.finished = false;
             p.hand = [];
         });
-        // Nếu không còn ai trong phòng thì reset luôn lastWinnerId và _lastGameWinnerId
         if (this.players.length === 0) {
             this.lastWinnerId = null;
             this._lastGameWinnerId = null;
         }
-        // Lấy điểm mới nhất cho từng player khi reset phòng
         const publicPlayers = await this.getPublicPlayers();
         this.broadcast('joined_room', {
             roomId: this.id,

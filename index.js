@@ -11,36 +11,33 @@ const cors = require('cors');
 app.use(express.json());
 
 const corsOptions = {
-  origin: 'https://tienlen-online.vercel.app', // Chỉ cho phép từ React app đang chạy ở đây
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],        // Giới hạn phương thức
-  credentials: true                // Cho phép cookie, token nếu cần
+    origin: 'http://localhost:3000',
+    methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    credentials: true 
 };
 
 app.use(cors(corsOptions));
 
-// Kết nối MongoDB
 mongoose.connect('mongodb+srv://tienlen:uFQnxTgpca4a4yyE@tienlen.b7dlfm7.mongodb.net/?retryWrites=true&w=majority&appName=tienlen', {
-  useNewUrlParser: true,
-  useUnifiedTopology: true
+    useNewUrlParser: true,
+    useUnifiedTopology: true
 }).then(() => console.log('MongoDB connected'))
-  .catch(err => console.error('MongoDB error:', err));
+    .catch(err => console.error('MongoDB error:', err));
 
-// Middleware xác thực
 function authMiddleware(req, res, next) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader) return res.status(401).json({ message: 'Chưa đăng nhập' });
-  const token = authHeader.split(' ')[1];
-  if (!token) return res.status(401).json({ message: 'Thiếu token' });
-  try {
-    const decoded = jwt.verify(token, 'tienlen_secret');
-    req.user = decoded;
-    next();
-  } catch (err) {
-    return res.status(401).json({ message: 'Token không hợp lệ' });
-  }
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.json({ status: 400, message: 'Chưa đăng nhập' });
+    const token = authHeader.split(' ')[1];
+    if (!token) return res.json({ status: 400, message: 'Chưa đăng nhập' });
+    try {
+        const decoded = jwt.verify(token, 'tienlen_secret');
+        req.user = decoded;
+        next();
+    } catch (err) {
+        return res.json({ status: 500, message: 'Chưa đăng nhập' });
+    }
 }
 
-// User routes
 app.post('/api/register', userController.register);
 app.post('/api/login', userController.login);
 app.get('/api/user/:id', authMiddleware, userController.getUser);
@@ -49,18 +46,31 @@ app.put('/api/user/:id', authMiddleware, userController.editUser);
 
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: {
-    origin: '*'
-  }
+    cors: {
+        origin: '*'
+    }
 });
 
 const gameManager = new GameManager(io);
 
 io.on('connection', (socket) => {
-  console.log('Client connected:', socket.id);
-  gameManager.handleConnection(socket);
+    socket.on('init_player', (data) => {
+        const { token } = data || {};
+
+        try {
+            const decoded = jwt.verify(token, 'tienlen_secret');
+            const userId = decoded.id;
+            if (!userId) return;
+            gameManager.handleConnection(socket, { userId });
+
+        } catch (err) {
+            console.log('JWT verification failed:', err);
+        }
+    });
 });
 
+
+
 server.listen(3001, () => {
-  console.log('Server running on http://localhost:3001');
+    console.log('Server running');
 });
