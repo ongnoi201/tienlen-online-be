@@ -11,7 +11,7 @@ const cors = require('cors');
 app.use(express.json());
 
 const corsOptions = {
-    origin: 'http://localhost:3000',
+    origin: 'https://tienlen-online.vercel.app',
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
     credentials: true 
 };
