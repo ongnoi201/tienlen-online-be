@@ -9,6 +9,16 @@ class GameManager {
         this.players = {};
     }
 
+    async establishVoiceConnections(room, newPlayer) {
+        room.players.forEach(p => {
+            if (p.id !== newPlayer.id) {
+                p.send('new_peer', { peerId: newPlayer.id });
+                newPlayer.send('new_peer', { peerId: p.id });
+            }
+        });
+    }
+
+
     handleConnection(socket, authData) {
         const userId = authData?.userId;
         const playerId = userId || socket.id;
@@ -33,6 +43,7 @@ class GameManager {
             const roomId = uuidv4();
             const room = new Room(roomId);
             room.addPlayer(player);
+            await this.establishVoiceConnections(room, player);
             this.rooms[roomId] = room;
 
             player.send('room_created', {
@@ -56,12 +67,7 @@ class GameManager {
             room.addPlayer(player);
 
             //thêm đoạn này
-            room.players.forEach(p => {
-                if (p.id !== playerId) {
-                    p.send('new_peer', { peerId: playerId });
-                    player.send('new_peer', { peerId: p.id });
-                }
-            });
+            await this.establishVoiceConnections(room, player);
             // kết thúc đoạn thêm
 
             await this.broadcastToRoom(room, 'joined_room', {
